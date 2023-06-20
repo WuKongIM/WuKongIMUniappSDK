@@ -7,7 +7,7 @@ import { Guid } from "./guid";
 
 import * as buffer from "buffer"
 
-let uniObj:any  =  getUni() // 为了能发布到npm上进行的骚操作
+const uniObj:any  =  getUni() // 为了能发布到npm上进行的骚操作
 
 
 
@@ -147,9 +147,7 @@ export class ConnectManager {
             connectPacket.uid = WKSDK.shared().config.uid || '';
             connectPacket.token = WKSDK.shared().config.token || '';
             const data = self.getProto().encode(connectPacket);
-            uniObj.sendSocketMessage({
-                data: data,
-            })
+            uniObj.sendSocketMessage({data})
         })
 
         uniObj.onSocketMessage((e) => {
