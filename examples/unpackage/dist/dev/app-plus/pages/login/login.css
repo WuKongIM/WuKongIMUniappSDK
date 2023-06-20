@@ -1,0 +1,47 @@
+
+.form[data-v-e4e4508d] {
+		width: 100%;
+		margin-top: 40px;
+}
+.item[data-v-e4e4508d] {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 100%;
+		margin-top: 20px;
+}
+.item uni-label[data-v-e4e4508d] {
+		font-size: 17px;
+}
+.field uni-input[data-v-e4e4508d] {
+		width: 200px;
+		height: 30px;
+		border: none;
+		margin-left: 20px;
+		font-size: 17px;
+}
+.form .submit[data-v-e4e4508d] {
+		margin-top: 40px;
+		height: 60px;
+		min-width: 300px;
+		max-width: 600px;
+		width: 80%;
+		border: none;
+		border-radius: 4px;
+		color: white;
+		background-color: rgb(228, 98, 64);
+		font-size: 20px;
+		cursor: pointer;
+}
+.logo[data-v-e4e4508d] {
+		height: 6em;
+		padding: 1.5em;
+		will-change: filter;
+		transition: filter 300ms;
+}
+.logo[data-v-e4e4508d]:hover {
+		filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.vue[data-v-e4e4508d]:hover {
+		filter: drop-shadow(0 0 2em #42b883aa);
+}
