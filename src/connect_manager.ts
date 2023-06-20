@@ -7,6 +7,19 @@ import { Guid } from "./guid";
 
 import * as buffer from "buffer"
 
+let uniObj:any  =  getUni() // 为了能发布到npm上进行的骚操作
+
+
+
+function getUni() {
+    if (typeof (window as any).uni === 'undefined') {
+        console.log('不是UniApp运行环境');
+    } else {
+        console.log('是UniApp运行环境');
+        return (window as any).uni
+    }
+}
+
 // import * as SignalClient from '@signalapp/signal-client';
 export enum ConnectStatus {
     Disconnect, // 断开连接
@@ -105,15 +118,16 @@ export class ConnectManager {
 
     }
 
+
     connectWithAddr(addr: string) {
         this.status = ConnectStatus.Connecting;
         console.log("connectWithAddr--->",addr)
-        uni.connectSocket({
+        uniObj.connectSocket({
             url: addr,
         })
         // this.ws.binaryType = 'arraybuffer';
         const self = this;
-        uni.onSocketOpen(() => {
+        uniObj.onSocketOpen(() => {
             console.log("onSocketOpen....")
 
             self.tempBufferData = new Array<number>() // 重置缓存
@@ -133,12 +147,12 @@ export class ConnectManager {
             connectPacket.uid = WKSDK.shared().config.uid || '';
             connectPacket.token = WKSDK.shared().config.token || '';
             const data = self.getProto().encode(connectPacket);
-            uni.sendSocketMessage({
+            uniObj.sendSocketMessage({
                 data: data,
             })
         })
 
-        uni.onSocketMessage((e) => {
+        uniObj.onSocketMessage((e) => {
             console.log("onSocketMessage....")
             self.unpacket(new Uint8Array(e.data), (packets) => {
                 if (packets.length > 0) {
@@ -148,7 +162,7 @@ export class ConnectManager {
                 }
             })
         });
-        uni.onSocketClose((params)=>{
+        uniObj.onSocketClose((params)=>{
             console.log('连接关闭！', params);
             if (this.status !== ConnectStatus.Disconnect) {
                 this.status = ConnectStatus.Disconnect;
@@ -159,7 +173,7 @@ export class ConnectManager {
                 this.reConnect();
             }
         })
-        uni.onSocketError((params)=>{
+        uniObj.onSocketError((params)=>{
             console.log('连接出错！', params);
             if (this.status !== ConnectStatus.Disconnect) {
                 this.status = ConnectStatus.Disconnect;
@@ -194,7 +208,7 @@ export class ConnectManager {
     onlyDisconnect() {
         this.stopHeart();
         this.stopReconnectTimer();
-        uni.closeSocket();
+        uniObj.closeSocket();
     }
 
     // 重连
@@ -216,7 +230,7 @@ export class ConnectManager {
 
     wssend(message: Packet) {
         if(this.status == ConnectStatus.Connected){
-            uni.sendSocketMessage({
+            uniObj.sendSocketMessage({
                 data: this.getProto().encode(message),
             })
         }
@@ -397,7 +411,7 @@ export class ConnectManager {
         this.sendPacket(packet);
     }
     close() {
-       uni.closeSocket()
+        uniObj.closeSocket()
     }
 }
 
