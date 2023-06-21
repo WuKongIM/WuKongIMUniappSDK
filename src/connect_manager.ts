@@ -151,7 +151,6 @@ export class ConnectManager {
         })
 
         uniObj.onSocketMessage((e) => {
-            console.log("onSocketMessage....")
             self.unpacket(new Uint8Array(e.data), (packets) => {
                 if (packets.length > 0) {
                     for (const packetData of packets) {

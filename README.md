@@ -9,7 +9,7 @@ yarn add wukongimuniappsdk
 
 ## 运行例子
 
-用XBuilder打开examples目录，点击运行即可。
+用HBuilder打开examples目录，点击运行即可。
 
 ## 注意点
 
