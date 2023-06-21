@@ -85,7 +85,7 @@ export class Convert {
     }
     static stringToUint8Array(str: string): Uint8Array {
         const newStr = unescape(encodeURIComponent(str))
-        var arr = [];
+        var arr = new Array<number>;
         for (var i = 0, j = newStr.length; i < j; ++i) {
             arr.push(newStr.charCodeAt(i));
         }

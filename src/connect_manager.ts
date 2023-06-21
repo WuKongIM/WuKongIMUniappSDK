@@ -9,14 +9,14 @@ import * as buffer from "buffer"
 
 const uniObj:any  =  getUni() // 为了能发布到npm上进行的骚操作
 
-
+declare const uni: any; // Declare uni as a global variable
 
 function getUni() {
-    if (typeof (window as any).uni === 'undefined') {
+    if (typeof uni === 'undefined') {
         console.log('不是UniApp运行环境');
     } else {
         console.log('是UniApp运行环境');
-        return (window as any).uni
+        return uni
     }
 }
 

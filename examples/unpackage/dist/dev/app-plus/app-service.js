@@ -230,7 +230,7 @@ if (uni.restoreGlobal) {
       fractionGroupSeparator: " ",
       // non-breaking space
       suffix: ""
-    }, ALPHABET2 = "0123456789abcdefghijklmnopqrstuvwxyz";
+    }, ALPHABET2 = "0123456789abcdefghijklmnopqrstuvwxyz", alphabetHasNormalDecimalDigits = true;
     function BigNumber2(v, b) {
       var alphabet, c, caseChanged, e, i2, isNum, len2, str, x = this;
       if (!(x instanceof BigNumber2))
@@ -279,7 +279,7 @@ if (uni.restoreGlobal) {
         }
       } else {
         intCheck(b, 2, ALPHABET2.length, "Base");
-        if (b == 10) {
+        if (b == 10 && alphabetHasNormalDecimalDigits) {
           x = new BigNumber2(v);
           return round(x, DECIMAL_PLACES + x.e + 1, ROUNDING_MODE);
         }
@@ -447,7 +447,8 @@ if (uni.restoreGlobal) {
           }
           if (obj.hasOwnProperty(p = "ALPHABET")) {
             v = obj[p];
-            if (typeof v == "string" && !/^.$|[+-.\s]|(.).*\1/.test(v)) {
+            if (typeof v == "string" && !/^.?$|[+\-.\s]|(.).*\1/.test(v)) {
+              alphabetHasNormalDecimalDigits = v.slice(0, 10) == "0123456789";
               ALPHABET2 = v;
             } else {
               throw Error(bignumberError + p + " invalid: " + v);
@@ -1067,7 +1068,7 @@ if (uni.restoreGlobal) {
         m = new BigNumber2(m);
       nIsBig = n.e > 14;
       if (!x.c || !x.c[0] || x.c[0] == 1 && !x.e && x.c.length == 1 || !n.c || !n.c[0]) {
-        y = new BigNumber2(Math.pow(+valueOf(x), nIsBig ? 2 - isOdd(n) : +valueOf(n)));
+        y = new BigNumber2(Math.pow(+valueOf(x), nIsBig ? n.s * (2 - isOdd(n)) : +valueOf(n)));
         return m ? y.mod(m) : y;
       }
       nIsNeg = n.s < 0;
@@ -1571,7 +1572,7 @@ if (uni.restoreGlobal) {
       } else {
         if (b == null) {
           str = e <= TO_EXP_NEG || e >= TO_EXP_POS ? toExponential(coeffToString(n.c), e) : toFixedPoint(coeffToString(n.c), e, "0");
-        } else if (b === 10) {
+        } else if (b === 10 && alphabetHasNormalDecimalDigits) {
           n = round(new BigNumber2(n), DECIMAL_PLACES + e + 1, ROUNDING_MODE);
           str = toFixedPoint(coeffToString(n.c), n.e, "0");
         } else {
@@ -11575,6 +11576,15 @@ if (uni.restoreGlobal) {
   let Guid = _Guid;
   Guid.validator = new RegExp("^[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}$", "i");
   Guid.EMPTY = "00000000-0000-0000-0000-000000000000";
+  const uniObj = getUni();
+  function getUni() {
+    if (typeof uni === "undefined") {
+      console.log("不是UniApp运行环境");
+    } else {
+      console.log("是UniApp运行环境");
+      return uni;
+    }
+  }
   var ConnectStatus = /* @__PURE__ */ ((ConnectStatus2) => {
     ConnectStatus2[ConnectStatus2["Disconnect"] = 0] = "Disconnect";
     ConnectStatus2[ConnectStatus2["Connected"] = 1] = "Connected";
@@ -11656,11 +11666,11 @@ if (uni.restoreGlobal) {
     connectWithAddr(addr) {
       this.status = 2;
       console.log("connectWithAddr--->", addr);
-      uni.connectSocket({
+      uniObj.connectSocket({
         url: addr
       });
       const self2 = this;
-      uni.onSocketOpen(() => {
+      uniObj.onSocketOpen(() => {
         console.log("onSocketOpen....");
         self2.tempBufferData = new Array();
         const seed = Uint8Array.from(self2.stringToUint(Guid.create().toString().replace(/-/g, "")));
@@ -11677,12 +11687,9 @@ if (uni.restoreGlobal) {
         connectPacket.uid = WKSDK.shared().config.uid || "";
         connectPacket.token = WKSDK.shared().config.token || "";
         const data = self2.getProto().encode(connectPacket);
-        uni.sendSocketMessage({
-          data
-        });
+        uniObj.sendSocketMessage({ data });
       });
-      uni.onSocketMessage((e) => {
-        console.log("onSocketMessage....");
+      uniObj.onSocketMessage((e) => {
         self2.unpacket(new Uint8Array(e.data), (packets) => {
           if (packets.length > 0) {
             for (const packetData of packets) {
@@ -11691,7 +11698,7 @@ if (uni.restoreGlobal) {
           }
         });
       });
-      uni.onSocketClose((params) => {
+      uniObj.onSocketClose((params) => {
         console.log("连接关闭！", params);
         if (this.status !== 0) {
           this.status = 0;
@@ -11701,7 +11708,7 @@ if (uni.restoreGlobal) {
           this.reConnect();
         }
       });
-      uni.onSocketError((params) => {
+      uniObj.onSocketError((params) => {
         console.log("连接出错！", params);
         if (this.status !== 0) {
           this.status = 0;
@@ -11733,7 +11740,7 @@ if (uni.restoreGlobal) {
     onlyDisconnect() {
       this.stopHeart();
       this.stopReconnectTimer();
-      uni.closeSocket();
+      uniObj.closeSocket();
     }
     // 重连
     reConnect() {
@@ -11753,7 +11760,7 @@ if (uni.restoreGlobal) {
     }
     wssend(message) {
       if (this.status == 1) {
-        uni.sendSocketMessage({
+        uniObj.sendSocketMessage({
           data: this.getProto().encode(message)
         });
       }
@@ -11904,7 +11911,7 @@ if (uni.restoreGlobal) {
       this.sendPacket(packet);
     }
     close() {
-      uni.closeSocket();
+      uniObj.closeSocket();
     }
   }
   const ChannelTypePerson = 1;
@@ -15617,7 +15624,7 @@ if (uni.restoreGlobal) {
     }
     static stringToUint8Array(str) {
       const newStr = unescape(encodeURIComponent(str));
-      var arr = [];
+      var arr = new Array();
       for (var i2 = 0, j = newStr.length; i2 < j; ++i2) {
         arr.push(newStr.charCodeAt(i2));
       }
