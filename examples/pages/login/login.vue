@@ -30,7 +30,7 @@
 	<div class="hello">
 		<div style="display: flex;justify-content: center;">
 			<a href="https://githubim.com" target="_blank">
-				<img src="/static/logo.png" class="logo" alt="Vite logo" />
+				<image src="/static/logo.png" class="logo" alt="Vite logo" style="width: 80px;height:80px"/>
 			</a>
 		</div>
 		<p style="text-align: center;">

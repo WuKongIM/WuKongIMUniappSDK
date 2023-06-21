@@ -13,6 +13,6 @@ export class WKConfig {
     heartbeatInterval: number = 60000; // 心跳频率 单位毫秒
     provider!: Provider
     receiptFlushInterval:number = 2000 // 回执flush间隔 单位为毫秒ms
-    sdkVersion = "1.0.0" // SDK版本号
+    sdkVersion = "1.0.2" // SDK版本号
 
 }
