@@ -27,7 +27,10 @@ export class WKWebsocket {
         if(uniObj) {
            this.ws = uniObj.connectSocket({
                 url: addr,
-                complete: ()=> {} // TODO: 这里一定要写，不然会返回一个 Promise对象
+               
+                complete: ()=> {
+                    // eslint-disable-next-line no-empty-function
+                } // TODO: 这里一定要写，不然会返回一个 Promise对象
             })
         }else{
             this.ws = new WebSocket(this.addr);
