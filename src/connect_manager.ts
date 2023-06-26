@@ -1,24 +1,12 @@
 import WKSDK from "./index"
-import { ConnackPacket, ConnectPacket, DisconnectPacket, IProto, Packet, PacketType, PingPacket, RecvackPacket, RecvPacket, SendPacket } from "./proto";
+import { ConnackPacket, ConnectPacket, DisconnectPacket, IProto, Packet, PacketType, PingPacket, RecvackPacket, RecvPacket, SendPacket, SubackPacket } from "./proto";
 import { generateKeyPair, sharedKey } from 'curve25519-js';
 import { Md5 } from "md5-typescript";
 import { SecurityManager } from "./security";
 import { Guid } from "./guid";
 
 import * as buffer from "buffer"
-
-const uniObj:any  =  getUni() // 为了能发布到npm上进行的骚操作
-
-declare const uni: any; // Declare uni as a global variable
-
-function getUni() {
-    if (typeof uni === 'undefined') {
-        console.log('不是UniApp运行环境');
-    } else {
-        console.log('是UniApp运行环境');
-        return uni
-    }
-}
+import { WKWebsocket } from "./websocket";
 
 // import * as SignalClient from '@signalapp/signal-client';
 export enum ConnectStatus {
@@ -32,6 +20,7 @@ export enum ConnectStatus {
 export type ConnectStatusListener = (status: ConnectStatus, reasonCode?: number) => void;
 
 export class ConnectManager {
+    ws?: WKWebsocket;
     status: ConnectStatus = ConnectStatus.Disconnect;  // 连接状态
     connectStatusListeners: ConnectStatusListener[] = new Array(); // 连接状态监听
 
@@ -118,18 +107,13 @@ export class ConnectManager {
 
     }
 
-
     connectWithAddr(addr: string) {
+        console.log("connectWithAddr--->")
         this.status = ConnectStatus.Connecting;
-        console.log("connectWithAddr--->",addr)
-        uniObj.connectSocket({
-            url: addr,
-        })
-        // this.ws.binaryType = 'arraybuffer';
+        this.ws = new WKWebsocket(addr);
         const self = this;
-        uniObj.onSocketOpen(() => {
-            console.log("onSocketOpen....")
-
+        this.ws.onopen(() => {
+            console.log('onopen...');
             self.tempBufferData = new Array<number>() // 重置缓存
 
             const seed = Uint8Array.from(self.stringToUint(Guid.create().toString().replace(/-/g, "")))
@@ -139,7 +123,7 @@ export class ConnectManager {
 
             const connectPacket = new ConnectPacket();
             connectPacket.clientKey = pubKey;
-            connectPacket.version = 0x5;
+            connectPacket.version = 0x1;
             connectPacket.deviceFlag = 0x1; // 0: app 1. web
             const deviceID = Guid.create().toString().replace(/-/g, "")
             connectPacket.deviceID = deviceID + "W";
@@ -147,11 +131,11 @@ export class ConnectManager {
             connectPacket.uid = WKSDK.shared().config.uid || '';
             connectPacket.token = WKSDK.shared().config.token || '';
             const data = self.getProto().encode(connectPacket);
-            uniObj.sendSocketMessage({data})
+            self.ws?.send(data);
         })
 
-        uniObj.onSocketMessage((e) => {
-            self.unpacket(new Uint8Array(e.data), (packets) => {
+        this.ws.onmessage((data: any) => {
+            self.unpacket(new Uint8Array(data), (packets) => {
                 if (packets.length > 0) {
                     for (const packetData of packets) {
                         self.onPacket(new Uint8Array(packetData));
@@ -159,8 +143,8 @@ export class ConnectManager {
                 }
             })
         });
-        uniObj.onSocketClose((params)=>{
-            console.log('连接关闭！', params);
+        this.ws.onclose((e)=>{
+            console.log('连接关闭！', e);
             if (this.status !== ConnectStatus.Disconnect) {
                 this.status = ConnectStatus.Disconnect;
                 this.notifyConnectStatusListeners(0);
@@ -170,8 +154,8 @@ export class ConnectManager {
                 this.reConnect();
             }
         })
-        uniObj.onSocketError((params)=>{
-            console.log('连接出错！', params);
+        this.ws.onerror((e)=>{
+            console.log('连接出错！', e);
             if (this.status !== ConnectStatus.Disconnect) {
                 this.status = ConnectStatus.Disconnect;
                 this.notifyConnectStatusListeners(0);
@@ -194,7 +178,7 @@ export class ConnectManager {
     }
 
     connected() {
-        return this.status === ConnectStatus.Connected
+        return this.status == ConnectStatus.Connected
     }
 
     disconnect() {
@@ -205,7 +189,11 @@ export class ConnectManager {
     onlyDisconnect() {
         this.stopHeart();
         this.stopReconnectTimer();
-        uniObj.closeSocket();
+        if (this.ws) {
+            this.ws.close();
+        }
+        this.status = ConnectStatus.Disconnect;
+
     }
 
     // 重连
@@ -220,17 +208,17 @@ export class ConnectManager {
         }
         const self = this;
         this.reConnectTimeout = setTimeout(() => {
+            if (this.ws) {
+                this.ws.close();
+                this.ws = undefined;
+            }
             self.onlyConnect();
             this.lockReconnect = false;
         }, 3000);
     }
 
-    wssend(message: Packet) {
-        if(this.status == ConnectStatus.Connected){
-            uniObj.sendSocketMessage({
-                data: this.getProto().encode(message),
-            })
-        }
+    wssend(message: SendPacket) {
+        this.ws?.send(this.getProto().encode(message));
     }
 
     unpacket(data: Uint8Array, callback: (data: Array<Array<number>>) => void) {
@@ -317,6 +305,8 @@ export class ConnectManager {
             const connackPacket = p as ConnackPacket;
             if (connackPacket.reasonCode === 1) {
                 console.log('连接成功！');
+
+                WKSDK.shared().channelManager.reSubscribe() // 重置订阅状态
                 this.status = ConnectStatus.Connected;
                 this.pingRetryCount = 0;
                 // 连接成功
@@ -335,9 +325,6 @@ export class ConnectManager {
                 } else {
                     SecurityManager.shared().aesIV = connackPacket.salt;
                 }
-
-
-
                 WKSDK.shared().chatManager.flushSendingQueue() // 将发送队列里的消息flush出去
             } else {
                 console.log('连接失败！错误->', connackPacket.reasonCode);
@@ -348,11 +335,17 @@ export class ConnectManager {
         } else if (p.packetType === PacketType.PONG) {
             this.pingRetryCount = 0;
         } else if (p.packetType === PacketType.DISCONNECT) { // 服务器要求客户端断开（一般是账号在其他地方登录，被踢）
+
             const disconnectPacket = (p as DisconnectPacket)
             console.log('连接被踢->', disconnectPacket);
             this.status = ConnectStatus.ConnectKick;
             this.needReconnect = false; // IM端返回连接失败就不再进行重连。
             this.notifyConnectStatusListeners(disconnectPacket.reasonCode);
+
+        } else if (p.packetType === PacketType.SUBACK) { // 订阅回执
+            const subackPacket = (p as SubackPacket)
+            console.log("订阅回执-->",subackPacket.action)
+            WKSDK.shared().channelManager.handleSuback(subackPacket)
         }
 
         WKSDK.shared().chatManager.onPacket(p)
@@ -365,11 +358,13 @@ export class ConnectManager {
     }
 
     sendPacket(p: Packet) {
-        if (this.connected()) {
-            this.wssend(p)
-        } else {
-            this.reConnect()
-        }
+        // if (this.connected()) {
+        //     this.ws?.send(this.getProto().encode(p))
+        // } else {
+        //     console.log("发送消息失败，连接已断开！")
+        //     this.reConnect()
+        // }
+        this.ws?.send(this.getProto().encode(p))
 
     }
 
@@ -405,10 +400,10 @@ export class ConnectManager {
         const packet = new RecvackPacket();
         packet.messageID = recvPacket.messageID;
         packet.messageSeq = recvPacket.messageSeq;
-        this.sendPacket(packet);
+        this.ws?.send(this.getProto().encode(packet));
     }
     close() {
-        uniObj.closeSocket()
+        this.ws?.close();
     }
 }
 

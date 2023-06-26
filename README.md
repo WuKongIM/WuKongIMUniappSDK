@@ -3,11 +3,16 @@
 
 https://githubim.com/sdk/uniapp
 
-## 安装
 
-yarn add wukongimuniappsdk
+## 运行
 
-## 运行例子
+在项目根目录执行
+
+```
+yarn install
+
+yarn build
+```
 
 用HBuilder打开examples目录，点击运行即可。
 
