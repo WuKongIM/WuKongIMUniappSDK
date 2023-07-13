@@ -1,4 +1,8 @@
 
+## Deprecated
+
+本项目已经废弃，请使用JSSDK：[JSSDK](https://github.com/WuKongIM/WuKongIMJSSDK)
+
 ## 文档
 
 https://githubim.com/sdk/uniapp
