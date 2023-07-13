@@ -1,18 +1,21 @@
 
 
-let wsCount = 0
 
-const uniObj: any = getUni() // 为了能发布到npm上进行的骚操作
+const platformObj: any = getPlatformObj() // 获取平台全局操作对象
 
-declare const uni: any; // Declare uni as a global variable
+declare const uni: any; // 定义uni 为全局对象
+declare const wx: any; // 定义wx为全局对象
 
-function getUni() {
-    if (typeof uni === 'undefined') {
-        console.log('不是UniApp运行环境');
-        return undefined
-    } else {
-        console.log('是UniApp运行环境');
+function getPlatformObj() {
+    if (typeof uni !== 'undefined') {
+        console.log('UniApp运行环境');
         return uni
+    } else if (typeof wx !== 'undefined') {
+        console.log('小程序运行环境');
+        return wx
+    } else {
+        console.log('web运行环境');
+        return undefined
     }
 }
 
@@ -21,11 +24,10 @@ export class WKWebsocket {
     ws!: WebSocket | any
     destory: boolean = false
     constructor(addr: string) {
-        wsCount++
         this.addr = addr
 
-        if(uniObj) {
-           this.ws = uniObj.connectSocket({
+        if(platformObj) {
+           this.ws = platformObj.connectSocket({
                 url: addr,
                
                 complete: ()=> {
@@ -40,10 +42,8 @@ export class WKWebsocket {
     }
 
     onopen(callback: () => void) {
-        if (uniObj) {
-            console.log("onSocketOpen....2")
+        if (platformObj) {
             this.ws.onOpen(() => {
-                console.log("onSocketOpen....3")
                 if (this.destory) {
                     return
                 }
@@ -64,7 +64,7 @@ export class WKWebsocket {
     }
 
     onmessage(callback: ((ev: MessageEvent) => any) | null) {
-        if (uniObj) {
+        if (platformObj) {
             this.ws.onMessage((e) => {
                 if (this.destory) {
                     return
@@ -87,7 +87,7 @@ export class WKWebsocket {
     }
 
     onclose(callback: (e: CloseEvent) => void) {
-        if (uniObj) {
+        if (platformObj) {
             this.ws.onClose((params) => {
                 if (this.destory) {
                     return
@@ -110,7 +110,7 @@ export class WKWebsocket {
     }
 
     onerror(callback: (e: Event) => void) {
-        if (uniObj) {
+        if (platformObj) {
             this.ws.onError((e) => {
                 if (callback) {
                     callback(e)
@@ -129,7 +129,7 @@ export class WKWebsocket {
     }
 
     send(data: any) {
-        if (uniObj) {
+        if (platformObj) {
             if(data instanceof Uint8Array) {
                 this.ws.send({ data:data.buffer })
             }else {
@@ -143,11 +143,7 @@ export class WKWebsocket {
     }
 
     close() {
-        if (uniObj) {
-            uniObj.closeSocket()
-        } else {
-            this.destory = true
-            this.ws.close()
-        }
+        this.destory = true
+        this.ws.close()
     }
 }

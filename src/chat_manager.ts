@@ -1,249 +1,414 @@
-import { MessageContentType } from "./const";
-import { Guid } from "./guid";
+import { Channel, ChannelInfo, ChannelTypeData, ListenerState, Message, SubscribeAction, SubscribeContext, SubscribeListener, SubscribeOption, SubscribeOptions, Subscriber, UnsubscribeListener } from "./model";
 import WKSDK from "./index";
-import { Channel, ChannelTypePerson, MediaMessageContent, Message, MessageContent, SyncOptions, MessageSignalContent } from "./model";
-import { Packet, RecvackPacket, RecvPacket, SendackPacket, SendPacket, Setting } from "./proto";
-import { Task, MessageTask, TaskStatus } from "./task";
-import { Md5 } from "md5-typescript";
-import { SecurityManager } from "./security";
+import { SubPacket, SubackPacket } from "./proto";
 
-export type MessageListener = ((message: Message) => void);
-export type MessageStatusListener = ((p: SendackPacket) => void);
 
-export class ChatManager {
-    cmdListeners: ((message: Message) => void)[] = new Array(); // 命令类消息监听
-    listeners: MessageListener[] = new Array(); // 收取消息监听
-    sendingQueues: Map<number, SendPacket> = new Map(); // 发送中的消息
-    sendStatusListeners: MessageStatusListener[] = new Array(); // 消息状态监听
-    clientSeq: number = 0
+// 成员数据改变回调
+export type SubscriberChangeListener = (channel: Channel) => void;
+export type ChannelInfoListener = (channelInfo: ChannelInfo) => void;
 
-    private static instance: ChatManager
-    public static shared() {
-        if (!this.instance) {
-            this.instance = new ChatManager();
-        }
-        return this.instance;
-    }
+
+
+
+export class ChannelManager {
+    // 频道基础信息map
+    channelInfocacheMap: any = {};
+    // 请求队列
+    requestQueueMap: Map<string, boolean> = new Map();
+    listeners: ((channelInfo: ChannelInfo) => void)[] = new Array(); // 监听改变
+    // 频道成员缓存信息map
+    subscribeCacheMap: Map<string, Subscriber[]> = new Map();
+    // 成员请求队列
+    requestSubscribeQueueMap: Map<string, boolean> = new Map();
+    // 成员改变监听
+    subscriberChangeListeners: SubscriberChangeListener[] = new Array();
+    // 频道删除监听
+    deleteChannelInfoListeners: ((channelInfo: ChannelInfo) => void)[] = new Array();
+
+    subscriberContexts: SubscribeContext[] = new Array(); // 订阅者上下文集合
+
+    subscriberContextTick: number = 0; // 订阅者上下文tick
 
 
     private constructor() {
-        if (WKSDK.shared().taskManager) {
-            WKSDK.shared().taskManager.addListener((task: Task) => {
-                if (task.status === TaskStatus.success) {
-                    if (task instanceof MessageTask) {
-                        const messageTask = task as MessageTask
-                        const sendPacket = this.sendingQueues.get(messageTask.message.clientSeq)
-                        if (sendPacket) {
-                            sendPacket.payload = messageTask.message.content.encode() // content需要重新编码
-                            WKSDK.shared().connectManager.sendPacket(sendPacket)
+
+    }
+
+    private static instance: ChannelManager
+    public static shared() {
+        if (!this.instance) {
+            this.instance = new ChannelManager();
+            // this.instance.subscriberContextTick = window.setInterval(() => {
+            //     this.instance.executeSubscribeContext();
+            // }, 2000)
+        }
+
+        return this.instance;
+    }
+
+    // 提取频道信息
+    async fetchChannelInfo(channel: Channel) {
+        const channelKey = channel.getChannelKey();
+        const has = this.requestQueueMap.get(channelKey); // 查看请求队列里是否有对应的请求，如果有则直接中断
+        if (has) {
+            return;
+        }
+        try {
+            this.requestQueueMap.set(channelKey, true);
+            if (WKSDK.shared().config.provider.channelInfoCallback != null) {
+
+                const channelInfoModel = await WKSDK.shared().config.provider.channelInfoCallback(channel);
+                this.channelInfocacheMap[channelKey] = channelInfoModel;
+                if (channelInfoModel) {
+                    this.notifyListeners(channelInfoModel);
+                }
+            }
+        } finally {
+            // 移除请求任务
+            this.requestQueueMap.delete(channelKey);
+        }
+    }
+    // 同步订阅者
+    async syncSubscribes(channel: Channel) {
+        const channelKey = channel.getChannelKey();
+        const has = this.requestSubscribeQueueMap.get(channelKey); // 查看请求队列里是否有对应的请求，如果有则直接中断
+        if (has) {
+            return;
+        }
+
+        try {
+            this.requestSubscribeQueueMap.set(channelKey, true);
+            let cacheSubscribers = this.subscribeCacheMap.get(channelKey);
+            let version: number = 0;
+            if (cacheSubscribers && cacheSubscribers.length > 0) {
+                const lastMember = cacheSubscribers[cacheSubscribers.length - 1];
+                version = lastMember.version;
+            } else {
+                cacheSubscribers = new Array();
+            }
+            const subscribers = await WKSDK.shared().config.provider.syncSubscribersCallback(channel, version || 0);
+            if (subscribers && subscribers.length > 0) {
+                for (const subscriber of subscribers) {
+                    let update = false;
+                    for (let j = 0; j < cacheSubscribers.length; j++) {
+                        const cacheSubscriber = cacheSubscribers[j];
+                        if (subscriber.uid === cacheSubscriber.uid) {
+                            update = true;
+                            cacheSubscribers[j] = subscriber;
+                            break;
                         }
                     }
+                    if (!update) {
+                        cacheSubscribers.push(subscriber);
+                    }
                 }
-            })
+            }
+            this.subscribeCacheMap.set(channelKey, cacheSubscribers);
+            // 通知监听器
+            this.notifySubscribeChangeListeners(channel);
+        } finally {
+            this.requestSubscribeQueueMap.delete(channelKey)
         }
 
     }
-
-    async onPacket(packet: Packet) {
-        if (packet instanceof RecvPacket) {
-            const recvPacket = packet as RecvPacket
-
-
-            const actMsgKey = SecurityManager.shared().encryption(recvPacket.veritifyString)
-            const actMsgKeyMD5 = Md5.init(actMsgKey)
-            if (actMsgKeyMD5 !== recvPacket.msgKey) {
-                console.log(`非法的消息，期望msgKey:${recvPacket.msgKey} 实际msgKey:${actMsgKeyMD5} 忽略此消息！！`);
-                return
+    getChannelInfo(channel: Channel): ChannelInfo | undefined {
+        return this.channelInfocacheMap[channel.getChannelKey()];
+    }
+    // 设置频道缓存
+    setChannleInfoForCache(channelInfo: ChannelInfo) {
+        this.channelInfocacheMap[channelInfo.channel.getChannelKey()] = channelInfo;
+    }
+    // 删除频道信息
+    deleteChannelInfo(channel: Channel) {
+        const channelInfo = this.channelInfocacheMap[channel.getChannelKey()]
+        delete this.channelInfocacheMap[channel.getChannelKey()]
+        return channelInfo;
+    }
+    getSubscribes(channel: Channel): Subscriber[] {
+        const subscribers = this.subscribeCacheMap.get(channel.getChannelKey());
+        const newSubscribers = new Array();
+        if (subscribers) {
+            for (const subscriber of subscribers) {
+                if (!subscriber.isDeleted) {
+                    newSubscribers.push(subscriber);
+                }
             }
-            recvPacket.payload = SecurityManager.shared().decryption(recvPacket.payload)
+        }
+        return newSubscribers;
+    }
+    // 获取我在频道内的信息
+    getSubscribeOfMe(channel: Channel) {
+        const subscribers = this.subscribeCacheMap.get(channel.getChannelKey());
+        if (subscribers) {
+            for (const subscriber of subscribers) {
+                if (!subscriber.isDeleted && subscriber.uid === WKSDK.shared().config.uid) {
+                    return subscriber;
+                }
+            }
+        }
+        return null;
+    }
 
-            // const setting = Setting.fromUint8(recvPacket.setting)
-           
-            const message = new Message(recvPacket)
-            this.sendRecvackPacket(recvPacket);
-            if (message.contentType === MessageContentType.cmd) { // 命令类消息分流处理
-                this.notifyCMDListeners(message);
+    addSubscriberChangeListener(listener: SubscriberChangeListener) {
+        this.subscriberChangeListeners.push(listener);
+    }
+    removeSubscriberChangeListener(listener: SubscriberChangeListener) {
+        const len = this.subscriberChangeListeners.length;
+        for (let i = 0; i < len; i++) {
+            if (listener === this.subscriberChangeListeners[i]) {
+                this.subscriberChangeListeners.splice(i, 1)
                 return;
             }
-            this.notifyMessageListeners(message);
-        } else if (packet instanceof SendackPacket) {
-            const sendack = packet as SendackPacket;
-            this.sendingQueues.delete(sendack.clientSeq);
-            // 发送消息回执
-            this.notifyMessageStatusListeners(sendack);
-        }
-
-    }
-
-    async syncMessages(channel: Channel, opts: SyncOptions): Promise<Message[]> {
-        if (!WKSDK.shared().config.provider.syncMessagesCallback) {
-            throw new Error("没有设置WKSDK.shared().config.provider.syncMessagesCallback")
-        }
-        return WKSDK.shared().config.provider.syncMessagesCallback!(channel, opts)
-    }
-
-    async syncMessageExtras(channel: Channel,extraVersion:number) {
-        if (!WKSDK.shared().config.provider.syncMessageExtraCallback) {
-            throw new Error("没有设置WKSDK.shared().config.provider.syncMessageExtraCallback")
-        }
-       return WKSDK.shared().config.provider.syncMessageExtraCallback!(channel,extraVersion,100)
-    }
-
-    sendRecvackPacket(recvPacket: RecvPacket) {
-        const packet = new RecvackPacket();
-        packet.noPersist = recvPacket.noPersist
-        packet.syncOnce = recvPacket.syncOnce
-        packet.reddot = recvPacket.reddot
-        packet.messageID = recvPacket.messageID;
-        packet.messageSeq = recvPacket.messageSeq;
-        WKSDK.shared().connectManager.sendPacket(packet)
-    }
-
-    /**
-     *  发送消息
-     * @param content  消息内容
-     * @param channel 频道对象
-     * @param setting  发送设置
-     * @returns 完整消息对象
-     */
-    async send(content: MessageContent, channel: Channel, setting?: Setting): Promise<Message> {
-
-        const packet = this.getSendPacket(content, channel, setting)
-
-        let opts = new Setting()
-        if (setting) {
-            opts = setting
-        }
-
-        this.sendingQueues.set(packet.clientSeq, packet);
-
-        const message = Message.fromSendPacket(packet, content)
-        if (content instanceof MediaMessageContent) {
-            const task = WKSDK.shared().config.provider.messageUploadTask(message)
-            if (task) {
-                WKSDK.shared().taskManager.addTask(task)
-            }
-        } else {
-            WKSDK.shared().connectManager.sendPacket(packet)
-        }
-        this.notifyMessageListeners(message)
-
-        return message
-    }
-    getSendPacket(content: MessageContent, channel: Channel, setting: Setting = new Setting()): SendPacket {
-        const packet = new SendPacket();
-        packet.setting = setting.toUint8()
-        packet.reddot = true;
-        packet.clientMsgNo = `${Guid.create().toString().replace(/-/gi, "")}3`
-        packet.clientSeq = this.getClientSeq()
-        packet.fromUID = WKSDK.shared().config.uid || '';
-        packet.channelID = channel.channelID;
-        packet.channelType = channel.channelType
-        packet.payload = content.encode()
-        return packet
-    }
-    getClientSeq() {
-        return ++this.clientSeq;
-    }
-
-    // 通知命令消息监听者
-    notifyCMDListeners(message: Message) {
-        if (this.cmdListeners) {
-            this.cmdListeners.forEach((listener: (message:Message) => void) => {
-                if (listener) {
-                    listener(message);
-                }
-            });
         }
     }
 
-    // 添加命令类消息监听
-    addCMDListener(listener: MessageListener) {
-        this.cmdListeners.push(listener);
+    // 添加删除频道信息监听
+    addDeleteChannelInfoListener(listener: (channel: ChannelInfo) => void) {
+        this.deleteChannelInfoListeners.push(listener);
     }
-    removeCMDListener(listener: MessageListener) {
-        const len = this.cmdListeners.length;
+    // 移除删除频道信息监听
+    removeDeleteChannelInfoListener(listener: (channel: ChannelInfo) => void) {
+        const len = this.deleteChannelInfoListeners.length;
         for (let i = 0; i < len; i++) {
-            if (listener === this.cmdListeners[i]) {
-                this.cmdListeners.splice(i, 1)
-                return
+            if (listener === this.deleteChannelInfoListeners[i]) {
+                this.deleteChannelInfoListeners.splice(i, 1)
+                return;
             }
         }
     }
-    // 添加消息监听
-    addMessageListener(listener: MessageListener) {
+    addListener(listener: ChannelInfoListener) {
         this.listeners.push(listener);
     }
-    // 移除消息监听
-    removeMessageListener(listener: MessageListener) {
+    removeListener(listener: ChannelInfoListener) {
         const len = this.listeners.length;
         for (let i = 0; i < len; i++) {
             if (listener === this.listeners[i]) {
                 this.listeners.splice(i, 1)
-                return
+                return;
             }
         }
     }
-    // 通知消息监听者
-    notifyMessageListeners(message: Message) {
+
+    // 通知成员监听变化
+    notifySubscribeChangeListeners(channel: Channel) {
+        if (this.subscriberChangeListeners) {
+            this.subscriberChangeListeners.forEach((callback) => {
+                callback(channel);
+            });
+        }
+    }
+
+    notifyListeners(channelInfoModel: ChannelInfo) {
         if (this.listeners) {
-            this.listeners.forEach((listener: MessageListener) => {
-                if (listener) {
-                    listener(message);
-                }
+            this.listeners.forEach((callback) => {
+                callback(channelInfoModel);
             });
         }
     }
 
-
-    // 通知消息状态改变监听者
-    notifyMessageStatusListeners(sendackPacket: SendackPacket) {
-        if (this.sendStatusListeners) {
-            this.sendStatusListeners.forEach((listener: (ack:SendackPacket) => void) => {
-                if (listener) {
-                    listener(sendackPacket);
+    notifySubscribeIfNeed(msg: Message) {
+        const subscribeContext = this.getSubscribeContext(msg.channel)
+        if (subscribeContext && subscribeContext.listenerStates) {
+            for (const listenerState of subscribeContext.listenerStates) {
+                if (listenerState.listener && listenerState.action === SubscribeAction.subscribe) {
+                    (listenerState.listener as SubscribeListener)(msg)
                 }
-            });
-        }
-    }
-    // 消息状态改变监听
-    addMessageStatusListener(listener: MessageStatusListener) {
-        this.sendStatusListeners.push(listener);
-    }
-    removeMessageStatusListener(listener: MessageStatusListener) {
-        const len = this.sendStatusListeners.length;
-        for (let i = 0; i < len; i++) {
-            if (listener === this.sendStatusListeners[i]) {
-                this.sendStatusListeners.splice(i, 1)
-                return
             }
         }
     }
 
-    // 将发送消息队列里的消息flush出去
-    flushSendingQueue() {
-        if (this.sendingQueues.size <= 0) {
-            return;
-        }
-        console.log(`flush 发送队列内的消息。数量${this.sendingQueues.size}`);
-        let clientSeqArray = new Array<number>();
-        this.sendingQueues.forEach((value, key) => {
-            clientSeqArray.push(key);
-        })
-        clientSeqArray = clientSeqArray.sort();
+    onSubscribe(ch: Channel | string, listener: SubscribeListener, ...opts: SubscribeOption[]) {
 
-        for (const clientSeq of clientSeqArray) {
-            const sendPacket = this.sendingQueues.get(clientSeq);
-            if (sendPacket) {
-                console.log("重试消息---->",sendPacket)
-                WKSDK.shared().connectManager.sendPacket(sendPacket);
+        // 参数设置
+        const subscribeOpts = new SubscribeOptions()
+        if (opts && opts.length > 0) {
+            for (const opt of opts) {
+                opt(subscribeOpts)
+            }
+        }
+        // 频道
+        let channel: Channel
+        let channelData: any
+        let channelType = ChannelTypeData
+        if (ch instanceof Channel) {
+            channelType = ch.channelType
+            channelData = this.parseChannelURL(ch.channelID)
+        } else {
+            channelData = this.parseChannelURL(ch)
+        }
+        channel = new Channel(channelData.channelID, channelType)
+
+        subscribeOpts.param = channelData.paramMap
+
+        // 设置上下文
+        let subscriberContext = this.getSubscribeContext(channel)
+        if (!subscriberContext) {
+            subscriberContext = new SubscribeContext(channel)
+            this.subscriberContexts.push(subscriberContext)
+        }
+        let exist = false
+        if (subscriberContext.listenerStates.length > 0) {
+            for (const listenerState of subscriberContext.listenerStates) {
+                if (listenerState.action === SubscribeAction.subscribe) {
+                    listenerState.handleOk = false
+                    listenerState.listener = listener
+                    listenerState.options = subscribeOpts
+                    exist = true
+                    break
+                }
+            }
+        }
+        if (!exist) {
+            subscriberContext.listenerStates.push(new ListenerState(SubscribeAction.subscribe, listener, subscribeOpts))
+        }
+        console.log("onSubscribe-->", subscriberContext.listenerStates.length)
+        this.executeSubscribeContext()
+    }
+
+    parseChannelURL(channelUrl: string) {
+        const data = channelUrl.split("?")
+        if (data.length > 1) {
+            const query = data[1]
+            const paramMap = new Map<string, any>()
+            const querys = query.split("&")
+            for (const q of querys) {
+                const queryData = q.split("=")
+                if (queryData.length > 1) {
+                    paramMap.set(queryData[0], queryData[1])
+                }
+            }
+            return { channelID: data[0], paramMap }
+        } else {
+            return { channelID: channelUrl, paramMap: new Map() }
+        }
+    }
+
+    onUnsubscribe(ch: Channel | string, listener?: UnsubscribeListener) {
+        // 频道
+        let channel: Channel
+        let channelData: any
+        let channelType = ChannelTypeData
+        if (ch instanceof Channel) {
+            channelType = ch.channelType
+            channelData = this.parseChannelURL(ch.channelID)
+        } else {
+            channelData = this.parseChannelURL(ch)
+        }
+        channel = new Channel(channelData.channelID, channelType)
+
+        let subscriberContext = this.getSubscribeContext(channel)
+        if (!subscriberContext) {
+            subscriberContext = new SubscribeContext(channel)
+            this.subscriberContexts.push(subscriberContext)
+        }
+
+        let exist = false
+        if (subscriberContext.listenerStates.length > 0) {
+            for (const listenerState of subscriberContext.listenerStates) {
+                if (listenerState.action === SubscribeAction.unsubscribe) {
+                    listenerState.handleOk = false
+                    listenerState.listener = listener
+                    exist = true
+                    break
+                }
+            }
+        }
+        if (!exist) {
+            subscriberContext.listenerStates.push(new ListenerState(SubscribeAction.unsubscribe, listener))
+        }
+        this.executeSubscribeContext()
+    }
+
+    // 重新订阅
+    reSubscribe() {
+        for (const subscriberContext of this.subscriberContexts) {
+            for (const listenerState of subscriberContext.listenerStates) {
+                listenerState.handleOk = false;
+                listenerState.sending = false
+            }
+        }
+        this.executeSubscribeContext()
+    }
+
+    handleSuback(ack: SubackPacket) {
+        for (const subscriberContext of this.subscriberContexts) {
+            if (ack.channelID === subscriberContext.channel.channelID && ack.channelType === subscriberContext.channel.channelType) {
+                if (ack.action === SubscribeAction.subscribe) {
+                    if (subscriberContext.listenerStates && subscriberContext.listenerStates.length > 0) {
+                        for (const listenerState of subscriberContext.listenerStates) {
+                            if (listenerState.handleOk) {
+                                continue;
+                            }
+                            listenerState.handleOk = true;
+                            if (listenerState.listener && listenerState.action === SubscribeAction.subscribe) {
+                                const subscribeListener = listenerState.listener as SubscribeListener
+                                subscribeListener(undefined, ack.reasonCode)
+                            }
+                        }
+                    }
+                } else {
+                    if (subscriberContext.listenerStates && subscriberContext.listenerStates.length > 0) {
+                        for (const listenerState of subscriberContext.listenerStates) {
+                            if (listenerState.handleOk) {
+                                continue;
+                            }
+                            listenerState.handleOk = true;
+                            if (listenerState.listener && listenerState.action === SubscribeAction.unsubscribe) {
+                                const unsubscribeListener = listenerState.listener as UnsubscribeListener
+                                unsubscribeListener(ack.reasonCode)
+                            }
+                        }
+                    }
+                }
             }
         }
 
+        if (ack.action === SubscribeAction.unsubscribe) {
+            for (let i = 0; i < this.subscriberContexts.length; i++) {
+                const subscriberContext = this.subscriberContexts[i]
+                if (subscriberContext.channel.channelID === ack.channelID && subscriberContext.channel.channelType === ack.channelType) {
+                    this.subscriberContexts.splice(i, 1)
+                    continue
+                }
+            }
+        }
     }
 
-    deleteMessageFromSendingQueue(clientSeq: number) {
-        this.sendingQueues.delete(clientSeq)
+    private getSubscribeContext(channel: Channel): SubscribeContext | undefined {
+        for (const subscriberContext of this.subscriberContexts) {
+            if (subscriberContext.channel.channelID === channel.channelID && subscriberContext.channel.channelType === channel.channelType) {
+                return subscriberContext;
+            }
+        }
+        return undefined;
     }
 
+    private executeSubscribeContext() {
+        for (const subscriberContext of this.subscriberContexts) {
+            if (subscriberContext && subscriberContext.listenerStates.length > 0) {
+                for (const listenerState of subscriberContext.listenerStates) {
+                    if (listenerState.handleOk || listenerState.sending) {
+                        continue;
+                    }
+                    listenerState.sending = true
+                    this.sendSubscribe(subscriberContext.channel, listenerState.action, listenerState.options)
+                }
+
+            }
+        }
+    }
+
+    private sendSubscribe(channel: Channel, action: SubscribeAction, opts?: SubscribeOptions) {
+
+        console.log("sendSubscribe---->", action)
+        const s = new SubPacket()
+        s.channelID = channel.channelID
+        s.channelType = channel.channelType
+        s.action = action
+        if (opts?.param) {
+            s.param = JSON.stringify(Object.fromEntries(opts?.param))
+        }
+
+        WKSDK.shared().connectManager.sendPacket(s)
+    }
 }

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 	import { ref } from 'vue';
 	import { APIClient } from '../../services/APIClient';
-	import { WKSDK, Message, MessageText, Channel, ChannelTypePerson, ChannelTypeGroup, MessageStatus, SyncOptions, PullMode } from "../../../src/sdk";
-	import { ConnectStatus } from '../../../src/connect_manager';
-	import { SendackPacket } from '../../../src/proto';
+	import { WKSDK, Message, MessageText, Channel, ChannelTypePerson, ChannelTypeGroup, MessageStatus, SyncOptions, PullMode } from "wukongimjssdk/lib/sdk";
+	import { ConnectStatus } from 'wukongimjssdk/lib/connect_manager';
+	import { SendackPacket } from 'wukongimjssdk/lib/proto';
 	import { Convert } from '../../services/convert';
 	import { nextTick } from 'process';
 

@@ -3081,6 +3081,22 @@ wrappy@1:
   resolved "https://registry.npmjs.org/wrappy/-/wrappy-1.0.2.tgz"
   integrity sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==
 
+wukongimjssdk@^1.0.5:
+  version "1.0.5"
+  resolved "https://registry.yarnpkg.com/wukongimjssdk/-/wukongimjssdk-1.0.5.tgz#0d93282f8049b5de392b40ebb187b9576b4a901d"
+  integrity sha512-uCHM7iW+o/H4NRFdcVkt6kjoG9RK9naEnmOL/9yaxvBPu6wGFW4aYhq+FQHRt+wW5vu87DRrCKEsrlbZGG9GRQ==
+  dependencies:
+    "@types/bignumber.js" "^5.0.0"
+    "@types/crypto-js" "^4.0.2"
+    bignumber.js "^9.0.1"
+    buffer "^6.0.3"
+    crypto-js "^4.1.1"
+    curve25519-js "^0.0.4"
+    md5-typescript "^1.0.5"
+    prettier "^2.0.2"
+    tslint "^6.1.0"
+    tslint-config-prettier "^1.18.0"
+
 wukongimuniappsdk@^1.0.1:
   version "1.0.1"
   resolved "https://registry.npmjs.org/wukongimuniappsdk/-/wukongimuniappsdk-1.0.1.tgz"
