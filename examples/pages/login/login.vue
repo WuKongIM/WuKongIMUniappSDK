@@ -1,6 +1,6 @@
 <script setup lang="ts">
 	import { ref } from 'vue'
-	import { WKSDK } from 'wukongimjssdk/lib/sdk';
+	import { WKSDK } from 'wukongimjssdk';
 	import { APIClient } from '../../services/APIClient';
 	// defineProps<{ msg: string }>()
 

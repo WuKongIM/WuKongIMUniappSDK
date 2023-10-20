@@ -1,5 +1,5 @@
-import { Setting } from "wukongimjssdk/lib/proto";
-import { WKSDK, Message, Channel, MessageStatus, MessageExtra } from "wukongimjssdk/lib/sdk";
+import { Setting } from "wukongimjssdk";
+import { WKSDK, Message, Channel, MessageStatus, MessageExtra } from "wukongimjssdk";
 import BigNumber from "bignumber.js";
 import { Buffer } from 'buffer';
 export class Convert {
